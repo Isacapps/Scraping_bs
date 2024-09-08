@@ -1,0 +1,133 @@
+####
+######
+# WEB SCRAPING 
+######
+####
+
+# CASE A: STATIC WEBSITE 
+# website used: https://books.toscrape.com/
+# The website is qualified as static since it remains unchanged. 
+# As we can see, there are not opening pop ups in the webpage.
+
+import requests
+from bs4 import BeautifulSoup
+import os
+from tqdm import tqdm
+import re
+import pandas as pd
+
+# Step 1: Retrieve the HTML content from a URL
+url = "https://books.toscrape.com/"
+response = requests.get(url)
+
+# Step 2: Parse the HTML content using BeautifulSoup
+soup = BeautifulSoup(response.text, 'html.parser')
+# Beautify the parsed HTML content by creating a formatted HTML content
+# It is useful to understand the structure of the website
+beautified_html = soup.prettify()
+
+# Since the information I want to extract are in individual book webpages, 
+# search the specific links to those webpages and ask for their HTML content
+# https://books.toscrape.com/catalogue/category/books/travel_2/index.html
+# Step 3: Find all book URLs from the website
+root = "https://books.toscrape.com/"  # Base URL of the website
+lst_path_books = []  # List to store the URLs of individual book pages
+# List of URLs for all pages containing book listings
+lst_views = [f"https://books.toscrape.com/catalogue/page_{i}/index.html" for i in range(2, 51)]
+# Add manually the URL of the first page at the beginning of the list. 
+lst_views.append("https://books.toscrape.com/index.html")  # Add the main page URL
+# Loop through each page URL to find book URLs
+for view in lst_views:
+    response = requests.get(view).text  # Fetch the HTML content of the page
+    soup = BeautifulSoup(response, 'html.parser')  # Parse the HTML content
+    anchors = soup.select('div.image_container a')  # Find all <a> tags within <div> with class="image_container"
+    for anchor in anchors:
+        # Construct the full URL for each book
+        if "catalogue" in anchor['href']:
+            p = os.path.join(root, anchor['href'])
+        else:
+            p = os.path.join(root, "catalogue", anchor['href'])
+        lst_path_books.append(p)  # Add the book URL to the list
+# The href attribute specifies the URL to which you are redirected when you click on the link.
+# Retrieve the HTML content of the website of each category and parse it. 
+# Search in the specific section a in the div.image_container for the link to the
+# individual book webpages and collect those links in a list. 
+
+# Step 4: Initialize the dictionary to store book data
+books_data = {}
+# Step 5: Loop through each book URL with a progress bar
+for book_url in tqdm(lst_path_books, desc="Processing books"):
+    print(book_url)  # Print the current book URL (for demo purposes)
+    response = requests.get(book_url)  # Fetch the HTML content of the book page
+    response.encoding = 'utf-8'  # Ensure the response encoding is set to UTF-8
+    soup = BeautifulSoup(response.text, 'html.parser')  # Parse the HTML content
+
+    book_data = {}  # Dictionary to store data for the current book
+
+    # Extract title and genre from the breadcrumb navigation
+    breadcrumb_items = soup.select('ul.breadcrumb > li')
+    title = breadcrumb_items[-1].get_text(strip=True)  # Get the book title
+    genre = breadcrumb_items[-2].get_text(strip=True)  # Get the book genre
+    book_data['genre'] = genre
+    book_data['title'] = title
+
+    # Extract star rating
+    word_to_number = {"One": 1, "Two": 2, "Three": 3, "Four": 4, "Five": 5}
+    p_tag = soup.find('p', class_='star-rating')
+    class_names = p_tag.get('class')
+    nb_stars = class_names[1]  # Get the star rating as a word
+    book_data['stars'] = word_to_number[nb_stars]  # Convert the word to a number
+
+    # Extract product description
+    description = soup.select("div#product_description + p")
+    if description:
+        book_data['description'] = description[0].text  # Get the description text
+    else:
+        book_data['description'] = ""  # Set to empty string if no description is found
+        
+     # Extract product information from the table
+    table = soup.find('table', class_='table table-striped')
+    for row in table.find_all('tr'):
+        header = row.find('th').get_text(strip=True)  # Get the header text
+        value = row.find('td').get_text(strip=True)  # Get the value text
+        book_data[header] = value
+
+    # Extract availability and number of reviews
+    pattern = r'\d+' # regular expression characterized by one or more decimals 
+    m = re.search(pattern, book_data['Availability'])
+    if m:
+        book_data['Availability'] = int(m.group())  # Convert availability to an integer
+    book_data['Number of reviews'] = int(book_data['Number of reviews'])  # Convert number of reviews to an integer
+
+    # Add the book data to the dictionary with the URL as the key
+    books_data[book_url] = book_data
+    
+    
+# Step 6: Print or process the books_data dictionary as needed
+# books_data is a dictionary of dictionaries. It is like: 
+# {url1: {key1.1: value1.1, key1.2: value1.2,...}, url2: {key2.1: value2.1, key2.2: value2.2,...}}
+for url, data in books_data.items():
+    print(f"URL: {url}")
+    for key, value in data.items():
+        print(f"{key}: {value}")
+    print("\n")
+
+# Step 7: Convert the books_data dictionary to a pandas DataFrame
+df = pd.DataFrame.from_dict(books_data, orient="index")
+# Take the dictionary and convert it in a dataframe by using as index the dictionary's keys. 
+# so, the attributes of the bookes are on the columns, while the 
+# associated values are on the rows
+
+# Step 8: Display the first few rows of the DataFrame
+df.head()
+
+# Step 9: Save the DataFrame to an Excel file
+print("Current working directory:", os.getcwd()) # Check the current working directory
+# Change the current wd if it is necessary
+new_directory = "C:\\Users\\Isabella\\OneDrive - unibs.it\\Desktop\\II anno\\I semestre\\Advanced programming"  
+os.chdir(new_directory)
+# Check that the wd has been changed
+print("Changed working directory:", os.getcwd())
+df.to_excel("results/metadata_bs.xlsx")   
+
+
